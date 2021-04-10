@@ -1,0 +1,2 @@
+# mayo_practica
+paractia
