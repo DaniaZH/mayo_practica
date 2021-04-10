@@ -1,0 +1,310 @@
+---
+title: "El lenguaje de programación R - Datos vectoriales - operaciones con datos espaciales"
+author: "Manuel Vargas"
+date: "2020-10-28"
+output:
+  html_document:
+    theme: readable    
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: false    
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+El código fuente de este documento está disponible en [https://github.com/pf0953-programaciongeoespacialr-2020/leccion-09-r-datos-vectoriales-operaciones-espaciales](https://github.com/pf0953-programaciongeoespacialr-2020/leccion-09-r-datos-vectoriales-operaciones-espaciales).
+
+## Recursos de interés
+* Sitio web del curso: [PF0953 Programación geoespacial en R](https://pf0953-programaciongeoespacialr-2020.github.io/)
+* Datos utilizados en el curso: [Datos del curso PF0953 Programación geoespacial en R](https://github.com/pf0953-programaciongeoespacialr-2020/datos)
+* [Geocomputation with R - Chapter 4 Spatial data operations](https://geocompr.robinlovelace.net/spatial-operations.html)
+* Sitio web del paquete sf: [Simple Features for R - sf](https://r-spatial.github.io/sf/)
+* Documentación del paquete dplyr de Tidyverse: [A Grammar of Data Manipulation - dplyr](https://dplyr.tidyverse.org/)
+
+## Preparativos
+Paquetes y datos para ejemplos:
+```{r message = FALSE}
+# Paquete para manejo de datos vectoriales
+library(sf)
+
+# Paquete de Tidyverse para manipulación de datos
+library(dplyr)
+
+# Paquete con conjuntos de datos geoespaciales
+library(spData)
+
+# Paquete para mapas en la Web
+library(leaflet)
+```
+
+Adicionalmente, se utilizan algunas capas geoespaciales de la [Infraestructura Nacional de Datos Espaciales de Costa Rica (SNIT)](http://www.snitcr.go.cr/):
+```{r message=FALSE, warning=FALSE, results='hide'}
+# URL base del servicio WFS IGN 1:5mil
+url_base_wfs_ign_5mil <- "http://geos.snitcr.go.cr/be/IGN_5/wfs?"
+
+# URL base del servicio WFS IGN 1:200mil
+url_base_wfs_ign_200mil <- "http://geos.snitcr.go.cr/be/IGN_200/wfs?"
+
+# URL base del servicio WFS del Sinac
+url_base_wfs_sinac <- "http://geos1pne.sirefor.go.cr/wfs?"
+
+# URL de las solicitudes de las capas
+solicitud_provincias_wfs <- 
+  "request=GetFeature&service=WFS&version=2.0.0&typeName=IGN_5:limiteprovincial_5k&outputFormat=application/json"
+
+solicitud_cantones_wfs <- 
+  "request=GetFeature&service=WFS&version=2.0.0&typeName=IGN_5:limitecantonal_5k&outputFormat=application/json"
+
+solicitud_aerodromos_wfs <- 
+  "request=GetFeature&service=WFS&version=1.0.0&typename=IGN_200:aerodromos_200k&outputFormat=application/json"
+
+solicitud_redvial_wfs <- 
+  "request=GetFeature&service=WFS&version=1.0.0&typename=IGN_200:redvial_200k&outputFormat=application/json"
+
+solicitud_asp_wfs <- 
+  "request=GetFeature&service=WFS&version=1.0.0&typename=PNE:areas_silvestres_protegidas&outputFormat=application/json"
+
+# Recuperación y simplificación de las capas
+# Provincias de Costa Rica
+cr_provincias <-
+  st_read(paste0(url_base_wfs_ign_5mil, solicitud_provincias_wfs)) %>%
+  st_simplify(dTolerance = 1000)
+
+# Cantones de Costa Rica
+cr_cantones <-
+  st_read(paste0(url_base_wfs_ign_5mil, solicitud_cantones_wfs)) %>%
+  st_simplify(dTolerance = 1000)
+
+# Áreas silvestres protegidas (ASP) de Costa Rica
+cr_asp <-
+  st_read(paste0(url_base_wfs_sinac, solicitud_asp_wfs)) %>%
+  st_simplify(dTolerance = 1000)
+
+# Red vial de Costa Rica
+cr_redvial <-
+  st_read(paste0(url_base_wfs_ign_200mil, solicitud_redvial_wfs)) %>%
+  st_simplify(dTolerance = 1000)
+
+# Aeródromos de Costa Rica
+cr_aerodromos <-
+  st_read(paste0(url_base_wfs_ign_200mil, solicitud_aerodromos_wfs))
+```
+
+También se incorpora una capa con registros de presencia de especies de _Reptilia_ (clase de los reptiles), en formato CSV, con datos agrupados por la [Infraestructura Mundial de Información en Biodiversidad (GBIF)](https://www.gbif.org/):
+```{r warning=FALSE, results='hide'}
+# Reptiles de Costa Rica
+cr_reptilia <- 
+  st_read(
+    "https://raw.githubusercontent.com/pf0953-programaciongeoespacialr-2020/datos/master/biodiversidad/registros-presencia/cr/cr-reptilia.csv", 
+    options=c(
+      "X_POSSIBLE_NAMES=decimalLongitude",
+      "Y_POSSIBLE_NAMES=decimalLatitude"
+    )
+  ) %>%
+  st_set_crs(4326) %>% 
+  st_transform(5367)
+```
+
+Visualización de las capas (1):
+```{r}
+# Visualización de las capas (1)
+plot(cr_provincias$geometry, axes=TRUE, graticule=TRUE, reset=FALSE)
+plot(cr_redvial$geometry, col="grey", lwd=0.4, add=TRUE)
+plot(cr_aerodromos$geometry, col="orange", pch=16, add=TRUE)
+```
+
+Visualización de las capas (2):
+```{r}
+# Visualización de las capas (2)
+plot(cr_asp$geometry, axes=TRUE, graticule=TRUE, reset=FALSE)
+plot(cr_reptilia$geometry, col="green", pch=16, cex=0.1, add=TRUE)
+```
+
+
+## Introducción
+Esta lección brinda una visión general de las operaciones espaciales en datos vectoriales del paquete [sf](https://r-spatial.github.io/sf/articles/sf1.html). Estas operaciones incluyen **creación de subconjuntos espaciales (_spatial subsetting_)**, **agregación espacial (_spatial aggregation_)** y **cruce de datos espaciales (_spatial joining_)**.
+
+## Creación de subconjuntos
+Es el proceso de seleccionar objetos espaciales basados en su relación con otros objetos espaciales. Esta relación puede ser de intersección, contención, "roce" (_touch_), entre otras.
+
+En el siguiente ejemplo, se seleccionan los puntos contenidos en un polígono:
+```{r}
+# Aeródromos en Limón
+
+# Geometría (polígonos) de la provincia de Limón
+limon <-
+  cr_provincias %>%
+  filter(provincia == "Limón")
+
+# Geometrías (puntos) de aeródromos contenidos en la geometría de Limón
+aerodromos_limon <- cr_aerodromos[limon, , op = st_within]
+
+# Mapeo
+plot(limon$geometry, axes=TRUE, graticule=TRUE, reset=FALSE)
+plot(aerodromos_limon$geometry, col="orange", pch=16, add=TRUE)
+```
+
+En el siguiente ejemplo, se seleccionan los polígonos contenidos en otro polígono:
+```{r}
+# ASP contenidas en Limón
+
+# Geometría (polígonos) de la provincia de Limón
+limon <-
+  cr_provincias %>%
+  filter(provincia == "Limón")
+
+# Geometrías (polígonos) de ASP contenidos en la geometría de Limón
+asp_limon <- cr_asp[limon, , op = st_within]
+
+# Mapeo
+plot(limon$geometry, axes=TRUE, graticule=TRUE, reset=FALSE)
+plot(asp_limon$geometry, col="green", add=TRUE)
+
+# Nombres de las ASP
+asp_limon %>%
+  st_drop_geometry() %>%
+  distinct(asp_limon$nombre_asp)
+```
+
+La función ```st_within()``` es una de las que se conoce como un [predicado geométrico binario](https://r-spatial.github.io/sf/reference/geos_binary_pred.html). Estas funciones relacionan, de diferentes maneras, dos conjuntos de geometrías.
+
+Nótese la diferencia al usar la función ```st_intersects()``` en lugar de ```st_within()```:
+```{r}
+# ASP que se intersecan con la provincia de Limón
+
+# Geometrías (polígonos) de ASP que se intersecan en la geometría de Limón
+asp_limon <- cr_asp[limon, , op = st_intersects]
+
+# Mapeo
+plot(limon$geometry, axes=TRUE, graticule=TRUE, reset=FALSE)
+plot(asp_limon$geometry, col="green", add=TRUE)
+
+# Nombres de las ASP
+asp_limon %>%
+  st_drop_geometry() %>%
+  distinct(asp_limon$nombre_asp)
+```
+Sugerencia: pruebe el ejemplo anterior con las funciones ```st_overlaps()```, ```st_disjoint()``` y ```st_touches()```.
+
+
+## Cruce de datos
+El cruce "no espacial" de dos conjuntos de datos se basa en uno o varios campos (llamdos llaves) que tienen en común los cojuntos que van a cruzarse. Los cruces espaciales se basan en un principio similar, pero en lugar de campos comunes, la relación entre los conjuntos se realiza a través de una operación topológica, a veces llamada _spatial overlay_. 
+
+El siguiente ejemplo cruza los registros (puntos) de presencia de una especie con el conjunto de datos de cantones (polígonos), para obtener el nombre del cantón de cada registro.
+
+```{r}
+# Registros de Bothrops asper (serpiente terciopelo) en Costa Rica
+cr_bothrops_asper <-
+  cr_reptilia %>%
+  filter(species == "Bothrops asper")
+
+# Cantones con registros de Bothrops asper
+cr_cantones_bothrops_asper <- cr_cantones[cr_bothrops_asper, ]
+
+# Cantidad de cantones con registros de Bothrops asper
+nrow(cr_cantones_bothrops_asper)
+
+# Se "cruzan" los datos con la tabla de cantones, para obtener el nombre del cantón
+cr_bothrops_asper_joined <- st_join(cr_bothrops_asper, cr_cantones["canton"])
+
+# Despliegue de los datos cruzados
+cr_bothrops_asper_joined[1:30, 
+                         c("species", "canton", "stateProvince",
+                           "decimalLongitude", "decimalLatitude"), 
+                         drop=TRUE]
+```
+
+La función ```st_join()``` realiza por defecto un *lef_join*, pero puede realizar cruces de otros tipos también. Por ejemplo, con el parámetro ```left=FALSE```, puede realizarse un *inner_join*. Tambié por defecto, la operación topológica que se aplica es ```st_intersects()```.
+
+## Agregación
+De manera similar al caso de la agregación de atributos, la agregación espacial es una forma de "condensar" o "resumir" datos. Los datos agregados muestran estadísticas de una variable (ej. promedio, suma) en relación con una variable de agrupación.
+
+El siguiente ejemplo muestra el promedio de altitud de los sitios altos de Nueva Zelanda para cada región del país.
+
+```{r}
+# Promedio de altitud de sitios altos para cada región de NZ
+nz_avheight <- aggregate(x = nz_height, by = nz, FUN = mean)
+
+# Mapa
+plot(nz_avheight["elevation"], axes=TRUE, graticule=TRUE)
+```
+
+Un resultado similar puede lograrse con funciones _tidy_:
+
+```{r}
+nz_avheight2 <- nz %>%
+  st_join(nz_height) %>%
+  group_by(Name) %>%
+  summarize(elevation = mean(elevation, na.rm = TRUE))
+
+plot(nz_avheight2["elevation"], axes=TRUE, graticule=TRUE)
+```
+
+## Ejercicios
+1. Despliegue la lista de especies de [vipéridos](https://en.wikipedia.org/wiki/Viperidae) (familia _Viperidae_) reportados en la provincia de Guanacaste. Despliegue también el mapa con las localidades.
+
+```{r}
+# Localidades de Viperidae en Guanacaste
+# Geometría (polígono) de la provincia de Puntarenas
+guanacaste <-
+  cr_provincias %>%
+  filter(provincia == "Guanacaste")
+# Registros de Viperidae en Costa Rica
+cr_viperidae <-
+  cr_reptilia %>%
+  filter(family == "Viperidae")
+# Geometrías (puntos) de Viperidae en Guanacaste
+guanacaste_viperidae <- cr_viperidae[guanacaste, , op = st_within]
+# Mapeo
+plot(guanacaste$geometry, axes=TRUE, graticule=TRUE, reset=FALSE)
+plot(guanacaste_viperidae$geometry, col="brown", pch=4, add=TRUE)
+# Nombres de las especies
+guanacaste_viperidae  %>%
+  st_drop_geometry() %>%
+  distinct(guanacaste_viperidae$species)
+```
+
+2. Presente el resultado anterior en un mapa de Leaflet.
+
+```{r}
+guanacaste_viperidae_wgs84 <- 
+  guanacaste_viperidae %>%
+  st_transform(4326)
+
+m <- leaflet() %>% 
+  addProviderTiles(providers$Esri.WorldImagery, group = "Imágenes de ESRI") %>% 
+  addProviderTiles(providers$Stamen.TonerLite, group = "Stamen Toner Lite") %>%
+  addProviderTiles(providers$OpenStreetMap.Mapnik, group = "OpenStreetMap") %>%
+  addCircleMarkers(data = guanacaste_viperidae_wgs84,
+                   stroke = F,
+                   radius = 4,
+                   fillColor = 'red',
+                   fillOpacity = 1,
+                   popup = paste(guanacaste_viperidae_wgs84$genus, 
+                                 guanacaste_viperidae_wgs84$species, 
+                                 sep = '<br/>')
+                   ) %>%
+  addLayersControl(baseGroups = c("OpenStreetMap", "Stamen Toner Lite", "Imágenes de ESRI")) %>%
+  addMiniMap(
+    toggleDisplay = TRUE,
+    tiles = providers$Stamen.TonerLite
+  )
+# Despliegue del mapa
+m
+```
+
+3. Repita el ejercicio de agregar el nombre del cantón a los registros de _Bothrops asper_, de manera que se incluyan solamente los registros en los que hay conincidencia (_match_).
+
+```{r}
+```
+
+3. Repita el ejercicio de agregar los datos de los sitios altos de Nueva Zelanda, pero de acuerdon con el valor máximo.
+
+```{r}
+```
